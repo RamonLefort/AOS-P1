@@ -8,53 +8,53 @@
 
 // Estructura del EXT2 (Superbloque)
 typedef struct {
-    uint32_t s_inodes_count;      // Numero total de inodos
-    uint32_t s_blocks_count;      // Número total de bloques
-    uint32_t s_r_blocks_count;    // Número total de bloques reservados
+    uint32_t s_inodes_count; // Numero total de inodos
+    uint32_t s_blocks_count; // Número total de bloques
+    uint32_t s_r_blocks_count; // Número total de bloques reservados
     uint32_t s_free_blocks_count; // Número total de bloques libres
     uint32_t s_free_inodes_count; // Número total de inodos libres
-    uint32_t s_first_data_block;  // Primer bloque de datos
-    uint32_t s_log_block_size;    // ID de tamaño de bloque
+    uint32_t s_first_data_block; // Primer bloque de datos
+    uint32_t s_log_block_size; // ID de tamaño de bloque
     uint32_t s_log_frag_size;
     uint32_t s_blocks_per_group;  
     uint32_t s_frags_per_group;
     uint32_t s_inodes_per_group;  
-    uint32_t s_mtime;             // Última vez que se ha montado
-    uint32_t s_wtime;             // Última vez que se ha modificado
+    uint32_t s_mtime; // Última vez que se ha montado
+    uint32_t s_wtime; // Última vez que se ha modificado
     uint16_t s_mnt_count;
     uint16_t s_max_mnt_count;
-    uint16_t s_magic;             // Número mágico (0xEF53 para el EXT2)
+    uint16_t s_magic; // Número mágico (0xEF53 para el EXT2)
     uint16_t s_state;
     uint16_t s_errors;
     uint16_t s_minor_rev_level;
-    uint32_t s_lastcheck;         // Última comprobación
+    uint32_t s_lastcheck; // Última comprobación
     uint32_t s_checkinterval;
     uint32_t s_creator_os;
     uint32_t s_rev_level;
     uint16_t s_def_resuid;
     uint16_t s_def_resgid;
-    uint32_t s_first_ino;         // Primer inodo
-    uint16_t s_inode_size;        // Tamaño del inodo
+    uint32_t s_first_ino; // Primer inodo
+    uint16_t s_inode_size; // Tamaño del inodo
     uint16_t s_block_group_nr;
     uint32_t s_feature_compat;
     uint32_t s_feature_incompat;
     uint32_t s_feature_ro_compat;
     uint8_t  s_uuid[16];
-    char     s_volume_name[16];   // Nombre del disco
+    char     s_volume_name[16]; // Nombre del disco
 } __attribute__((packed)) Ext2Superblock;
 
 // Estructura del FAT16 (Sector de arranque)
 typedef struct {
-    uint8_t  ignored[3];
-    char     system_name[8];      // Nombre del sistema de archivos
-    uint16_t sector_size;         // Tamaño del sector
-    uint8_t  sec_per_cluster;     // Número de sectores por clúster
-    uint16_t reserved_sectors;    // Número de sectores reservados
-    uint8_t  num_fats;            // Número de tablas de FAT
-    uint16_t root_entries;        // Número de entradas en el directorio raíz
+    uint8_t  jmp_Boot[3];  //Bytes no necesarios, los ponemos para poder leer la estructura sin problemas
+    char     system_name[8]; // Nombre del sistema de archivos
+    uint16_t bytes_per_sec; // Tamaño del sector
+    uint8_t  sec_per_cluster; // Número de sectores por clúster
+    uint16_t reserved_sectors; // Número de sectores reservados
+    uint8_t  num_fats; // Número de tablas de FAT
+    uint16_t root_entries; // Número de entradas en el directorio raíz
     uint16_t total_sectors_16;
     uint8_t  media_type;
-    uint16_t fat_size_16;         // Número de sectores por FAT
+    uint16_t fat_size_16; // Número de sectores por FAT
     uint16_t sec_per_track;
     uint16_t num_heads;
     uint32_t hidden_sectors;
@@ -63,8 +63,8 @@ typedef struct {
     uint8_t  reserved;
     uint8_t  boot_signature;
     uint32_t volume_id;
-    char     volume_label[11];    // Nombre del disco
-    char     file_system_type[8];
+    char     volume_label[11]; // Nombre del disco
+    char     file_system_type[8]; // Tipo de sistema de archivos
 } __attribute__((packed)) Fat16BootSector;
 
 // --- Funciones auxiliares ---
@@ -81,9 +81,41 @@ void format_time(uint32_t timestamp) {
     }
 }
 
+// Devuelve 1 si es FAT16, 0 sino
+int is_fat16(Fat16BootSector *fat) {
+    uint32_t total_sectorsfat;  
+    if(fat->total_sectors_16 != 0){
+        total_sectorsfat = fat->total_sectors_16;
+    }else{
+        total_sectorsfat = fat->total_sectors_32;
+    }
+
+    uint32_t root_dir_sectors = ((fat->root_entries * 32) + (fat->bytes_per_sec - 1)) / fat->bytes_per_sec;
+
+    // En FAT32 fat_size_16 es 0
+    if (fat->fat_size_16 == 0) {
+        return 0; // Es FAT32
+    }
+
+    uint32_t data_sectors = total_sectorsfat - (fat->reserved_sectors + (fat->num_fats * fat->fat_size_16) + root_dir_sectors);
+
+    if (fat->sec_per_cluster == 0) {
+        return 0;
+    }
+
+    // Calculamos número de clusters para estar seguros de que es FAT16
+    uint32_t total_clusters = data_sectors / fat->sec_per_cluster;
+
+    if (total_clusters >= 4085 && total_clusters < 65525) {
+        return 1; // Es FAT16
+    }
+    
+    return 0; // No es FAT16 (es FAT12 o FAT32)
+}
+
 // --- Funciones principales ---
 // Esta función procesa y lee la información de un sistema de archivos EXT2 y la muestra por pantalla
-void process_ext2(int fd) {
+void EXT2_showInfo(int fd) {
     Ext2Superblock ext2;
 
     //Empezamos por la adreça 1024 ya que es donde está el superbloque del EXT2
@@ -121,18 +153,23 @@ void process_ext2(int fd) {
 }
 
 // Esta función procesa y lee la información de un sistema de archivos EXT2 y la muestra por pantalla
-void process_fat16(int fd) {
+void FAT16_showInfo(int fd) {
     Fat16BootSector fat16;
 
     //Empezamos desde el principio ya que es donde esta el sector de arranquue del FAT16
     lseek(fd, 0, SEEK_SET);
     read(fd, &fat16, sizeof(Fat16BootSector));
 
+    if (!is_fat16(&fat16)) {
+        printf("El sistema de archivos no es FAT16\n");
+        return;
+    }
+
     printf("\n------ Filesystem Information ------\n\n");
     printf("Filesystem: FAT16\n\n");
 
     printf("System name: %.8s\n", fat16.system_name);
-    printf("Sector size: %u\n", fat16.sector_size);
+    printf("Sector size: %u\n", fat16.bytes_per_sec);
     printf("Sectors per cluster: %u\n", fat16.sec_per_cluster);
     printf("Reserved sectors: %u\n", fat16.reserved_sectors);
     printf("# of FATs: %u\n", fat16.num_fats);
@@ -161,9 +198,9 @@ int main(int argc, char* argv[]) {
 
     //Si el número mágico es 0xEF53 es un sistema EXT2, sino es FAT16
     if (magic == 0xEF53) {
-        process_ext2(fd);
+        EXT2_showInfo(fd);
     } else {
-        process_fat16(fd);
+        FAT16_showInfo(fd);
     }
 
     close(fd);
